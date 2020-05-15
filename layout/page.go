@@ -150,32 +150,48 @@ func (page *Page) Decode(dictPage *Page) {
 }
 
 //Encoding values
-func (page *Page) EncodingValues(valuesBuf []interface{}) []byte {
+func (page *Page) EncodingValues(storage []byte, valuesBuf []interface{}) []byte {
 	encodingMethod := parquet.Encoding_PLAIN
 	if page.Info.Encoding != 0 {
 		encodingMethod = page.Info.Encoding
 	}
 	if encodingMethod == parquet.Encoding_RLE {
 		bitWidth := page.Info.Length
-		return encoding.WriteRLEBitPackedHybrid(valuesBuf, bitWidth, *page.Schema.Type)
+		return append(storage, encoding.WriteRLEBitPackedHybrid(valuesBuf, bitWidth, *page.Schema.Type)...)
 
 	} else if encodingMethod == parquet.Encoding_DELTA_BINARY_PACKED {
-		return encoding.WriteDelta(valuesBuf)
+		return append(storage, encoding.WriteDelta(valuesBuf)...)
 
 	} else if encodingMethod == parquet.Encoding_DELTA_BYTE_ARRAY {
-		return encoding.WriteDeltaByteArray(valuesBuf)
+		return append(storage, encoding.WriteDeltaByteArray(valuesBuf)...)
 
 	} else if encodingMethod == parquet.Encoding_DELTA_LENGTH_BYTE_ARRAY {
-		return encoding.WriteDeltaLengthByteArray(valuesBuf)
+		return append(storage, encoding.WriteDeltaLengthByteArray(valuesBuf)...)
 
 	} else {
-		return encoding.WritePlain(valuesBuf, *page.Schema.Type)
+		return encoding.WritePlain(storage, valuesBuf, *page.Schema.Type)
 	}
 	return []byte{}
 }
 
 //Compress the data page to parquet file
 func (page *Page) DataPageCompress(compressType parquet.CompressionCodec) []byte {
+	var dataBuf []byte
+
+	//repetitionLevel/////////////////////////////////
+	if page.DataTable.MaxRepetitionLevel > 0 {
+		dataBuf = encoding.WriteRLEBitPackedHybridInt32(dataBuf,
+			page.DataTable.RepetitionLevels,
+			int32(common.BitNum(uint64(page.DataTable.MaxRepetitionLevel))))
+	}
+
+	//definitionLevel//////////////////////////////////
+	if page.DataTable.MaxDefinitionLevel > 0 {
+		dataBuf = encoding.WriteRLEBitPackedHybridInt32(dataBuf,
+			page.DataTable.DefinitionLevels,
+			int32(common.BitNum(uint64(page.DataTable.MaxDefinitionLevel))))
+	}
+
 	ln := len(page.DataTable.DefinitionLevels)
 
 	//values////////////////////////////////////////////
@@ -197,29 +213,7 @@ func (page *Page) DataPageCompress(compressType parquet.CompressionCodec) []byte
 		valuesBuf = page.DataTable.Values
 	}
 	//valuesRawBuf := encoding.WritePlain(valuesBuf)
-	valuesRawBuf := page.EncodingValues(valuesBuf)
-
-	//definitionLevel//////////////////////////////////
-	var definitionLevelBuf []byte
-	if page.DataTable.MaxDefinitionLevel > 0 {
-		definitionLevelBuf = encoding.WriteRLEBitPackedHybridInt32(
-			page.DataTable.DefinitionLevels,
-			int32(common.BitNum(uint64(page.DataTable.MaxDefinitionLevel))))
-	}
-
-	//repetitionLevel/////////////////////////////////
-	var repetitionLevelBuf []byte
-	if page.DataTable.MaxRepetitionLevel > 0 {
-		repetitionLevelBuf = encoding.WriteRLEBitPackedHybridInt32(
-			page.DataTable.RepetitionLevels,
-			int32(common.BitNum(uint64(page.DataTable.MaxRepetitionLevel))))
-	}
-
-	//dataBuf = repetitionBuf + definitionBuf + valuesRawBuf
-	dataBuf := make([]byte, 0, len(repetitionLevelBuf) + len(definitionLevelBuf) + len(valuesRawBuf))
-	dataBuf = append(dataBuf, repetitionLevelBuf...)
-	dataBuf = append(dataBuf, definitionLevelBuf...)
-	dataBuf = append(dataBuf, valuesRawBuf...)
+	dataBuf = page.EncodingValues(dataBuf, valuesBuf)
 
 	var dataEncodeBuf []byte = compress.Compress(dataBuf, compressType)
 
@@ -236,7 +230,7 @@ func (page *Page) DataPageCompress(compressType parquet.CompressionCodec) []byte
 
 	page.Header.DataPageHeader.Statistics = parquet.NewStatistics()
 	if page.MaxVal != nil {
-		tmpBuf := encoding.WritePlain([]interface{}{page.MaxVal}, *page.Schema.Type)
+		tmpBuf := encoding.WritePlain(nil, []interface{}{page.MaxVal}, *page.Schema.Type)
 		if *page.Schema.Type == parquet.Type_BYTE_ARRAY {
 		// if (page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_DECIMAL) ||
 		// 	(page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_UTF8) {
@@ -245,7 +239,7 @@ func (page *Page) DataPageCompress(compressType parquet.CompressionCodec) []byte
 		page.Header.DataPageHeader.Statistics.Max = tmpBuf
 	}
 	if page.MinVal != nil {
-		tmpBuf := encoding.WritePlain([]interface{}{page.MinVal}, *page.Schema.Type)
+		tmpBuf := encoding.WritePlain(nil, []interface{}{page.MinVal}, *page.Schema.Type)
 		if *page.Schema.Type == parquet.Type_BYTE_ARRAY {
 		// if (page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_DECIMAL) ||
 		// 	(page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_UTF8) {
@@ -276,7 +270,7 @@ func (page *Page) DataPageV2Compress(compressType parquet.CompressionCodec) []by
 		}
 	}
 	//valuesRawBuf := encoding.WritePlain(valuesBuf)
-	valuesRawBuf := page.EncodingValues(valuesBuf)
+	valuesRawBuf := page.EncodingValues(nil, valuesBuf)
 
 	//definitionLevel//////////////////////////////////
 	var definitionLevelBuf []byte
@@ -326,7 +320,7 @@ func (page *Page) DataPageV2Compress(compressType parquet.CompressionCodec) []by
 
 	page.Header.DataPageHeaderV2.Statistics = parquet.NewStatistics()
 	if page.MaxVal != nil {
-		tmpBuf := encoding.WritePlain([]interface{}{page.MaxVal}, *page.Schema.Type)
+		tmpBuf := encoding.WritePlain(nil, []interface{}{page.MaxVal}, *page.Schema.Type)
 		if *page.Schema.Type == parquet.Type_BYTE_ARRAY {
 		// if (page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_DECIMAL) ||
 		// 	(page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_UTF8) {
@@ -335,7 +329,7 @@ func (page *Page) DataPageV2Compress(compressType parquet.CompressionCodec) []by
 		page.Header.DataPageHeaderV2.Statistics.Max = tmpBuf
 	}
 	if page.MinVal != nil {
-		tmpBuf := encoding.WritePlain([]interface{}{page.MinVal}, *page.Schema.Type)
+		tmpBuf := encoding.WritePlain(nil, []interface{}{page.MinVal}, *page.Schema.Type)
 		if *page.Schema.Type == parquet.Type_BYTE_ARRAY {
 		// if (page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_DECIMAL) ||
 		// 	(page.Schema.ConvertedType != nil && *page.Schema.ConvertedType == parquet.ConvertedType_UTF8) {

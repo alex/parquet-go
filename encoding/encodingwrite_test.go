@@ -189,7 +189,7 @@ func TestWritePlainBYTE_ARRAY(t *testing.T) {
 	}
 
 	for _, data := range testData {
-		res := WritePlainBYTE_ARRAY(data.nums)
+		res := WritePlainBYTE_ARRAY(nil, data.nums)
 		if string(res) != string(data.expected) {
 			t.Errorf("WritePlainBYTE_ARRAY error, expect %v, get %v", data.expected, res)
 		}

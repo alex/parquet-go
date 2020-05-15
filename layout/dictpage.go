@@ -46,7 +46,7 @@ func DictRecToDictPage(dictRec *DictRecType, pageSize int32, compressType parque
 
 //Compress the dict page to parquet file
 func (page *Page) DictPageCompress(compressType parquet.CompressionCodec, pT parquet.Type) []byte {
-	dataBuf := encoding.WritePlain(page.DataTable.Values, pT)
+	dataBuf := encoding.WritePlain(nil, page.DataTable.Values, pT)
 	var dataEncodeBuf []byte = compress.Compress(dataBuf, compressType)
 
 	//pageHeader/////////////////////////////////////
@@ -139,26 +139,23 @@ func (page *Page) DictDataPageCompress(compressType parquet.CompressionCodec, bi
 	valuesRawBuf := []byte{byte(bitWidth)}
 	valuesRawBuf = append(valuesRawBuf, encoding.WriteRLE(page.DataTable.Values, bitWidth, parquet.Type_INT32)...)
 
-	//definitionLevel//////////////////////////////////
-	var definitionLevelBuf []byte
-	if page.DataTable.MaxDefinitionLevel > 0 {
-		definitionLevelBuf = encoding.WriteRLEBitPackedHybridInt32(
-			page.DataTable.DefinitionLevels,
-			int32(common.BitNum(uint64(page.DataTable.MaxDefinitionLevel))))
-	}
+	var dataBuf []byte
 
 	//repetitionLevel/////////////////////////////////
-	var repetitionLevelBuf []byte
 	if page.DataTable.MaxRepetitionLevel > 0 {
-		repetitionLevelBuf = encoding.WriteRLEBitPackedHybridInt32(
+		dataBuf = encoding.WriteRLEBitPackedHybridInt32(dataBuf,
 			page.DataTable.RepetitionLevels,
 			int32(common.BitNum(uint64(page.DataTable.MaxRepetitionLevel))))
 	}
 
+	//definitionLevel//////////////////////////////////
+	if page.DataTable.MaxDefinitionLevel > 0 {
+		dataBuf = encoding.WriteRLEBitPackedHybridInt32(dataBuf,
+			page.DataTable.DefinitionLevels,
+			int32(common.BitNum(uint64(page.DataTable.MaxDefinitionLevel))))
+	}
+
 	//dataBuf = repetitionBuf + definitionBuf + valuesRawBuf
-	var dataBuf []byte
-	dataBuf = append(dataBuf, repetitionLevelBuf...)
-	dataBuf = append(dataBuf, definitionLevelBuf...)
 	dataBuf = append(dataBuf, valuesRawBuf...)
 
 	var dataEncodeBuf []byte = compress.Compress(dataBuf, compressType)

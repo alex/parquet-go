@@ -68,7 +68,7 @@ func TestReadPlainBYTE_ARRAY(t *testing.T) {
 	}
 
 	for _, data := range testData {
-		res, _ := ReadPlainBYTE_ARRAY(bytes.NewReader(WritePlainBYTE_ARRAY(data)), uint64(len(data)))
+		res, _ := ReadPlainBYTE_ARRAY(bytes.NewReader(WritePlainBYTE_ARRAY(nil, data)), uint64(len(data)))
 		if fmt.Sprintf("%v", data) != fmt.Sprintf("%v", res) {
 			t.Errorf("ReadPlainBYTE_ARRAY err, %v", data)
 		}

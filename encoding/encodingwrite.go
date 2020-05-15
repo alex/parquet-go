@@ -30,30 +30,30 @@ func ToInt64(nums []interface{}) []int64 { //convert bool/int values to int64 va
 	return res
 }
 
-func WritePlain(src []interface{}, pt parquet.Type) []byte {
+func WritePlain(storage []byte, src []interface{}, pt parquet.Type) []byte {
 	ln := len(src)
 	if ln <= 0 {
-		return []byte{}
+		return storage
 	}
 
 	if pt == parquet.Type_BOOLEAN {
-		return WritePlainBOOLEAN(src)
+		return append(storage, WritePlainBOOLEAN(src)...)
 	} else if pt == parquet.Type_INT32 {
-		return WritePlainINT32(src)
+		return append(storage, WritePlainINT32(src)...)
 	} else if pt == parquet.Type_INT64 {
-		return WritePlainINT64(src)
+		return append(storage, WritePlainINT64(src)...)
 	} else if pt == parquet.Type_INT96 {
-		return WritePlainINT96(src)
+		return append(storage, WritePlainINT96(src)...)
 	} else if pt == parquet.Type_FLOAT {
-		return WritePlainFLOAT(src)
+		return append(storage, WritePlainFLOAT(src)...)
 	} else if pt == parquet.Type_DOUBLE {
-		return WritePlainDOUBLE(src)
+		return append(storage, WritePlainDOUBLE(src)...)
 	} else if pt == parquet.Type_BYTE_ARRAY {
-		return WritePlainBYTE_ARRAY(src)
+		return WritePlainBYTE_ARRAY(storage, src)
 	} else if pt == parquet.Type_FIXED_LEN_BYTE_ARRAY {
-		return WritePlainFIXED_LEN_BYTE_ARRAY(src)
+		return append(storage, WritePlainFIXED_LEN_BYTE_ARRAY(src)...)
 	} else {
-		return []byte{}
+		return storage
 	}
 }
 
@@ -101,22 +101,30 @@ func WritePlainDOUBLE(nums []interface{}) []byte {
 	return bufWriter.Bytes()
 }
 
-func WritePlainBYTE_ARRAY(arrays []interface{}) []byte {
+func ensureLength(storage []byte, extraLength int) []byte {
+	if len(storage) + extraLength < cap(storage) {
+		return storage[:len(storage) + extraLength]
+	} else {
+		return append(storage, make([]byte, extraLength)...)
+	}
+}
+
+func WritePlainBYTE_ARRAY(storage []byte, arrays []interface{}) []byte {
 	bufLen := 0
 	for i := 0; i < len(arrays); i++ {
 		bufLen += 4 + len(arrays[i].(string))
 	}
 
-	buf := make([]byte, bufLen)
-	pos := 0
+	pos := len(storage)
+	storage = ensureLength(storage, bufLen)
 	for i := 0; i < len(arrays); i++ {
 		value := arrays[i].(string)
-		binary.LittleEndian.PutUint32(buf[pos:], uint32(len(value)))
+		binary.LittleEndian.PutUint32(storage[pos:], uint32(len(value)))
 		pos += 4
-		copy(buf[pos:pos+len(value)], value)
+		copy(storage[pos:pos+len(value)], value)
 		pos += len(value)
 	}
-	return buf
+	return storage
 }
 
 func WritePlainFIXED_LEN_BYTE_ARRAY(arrays []interface{}) []byte {
@@ -159,7 +167,7 @@ func WriteRLE(vals []interface{}, bitWidth int32, pt parquet.Type) []byte {
 		byteNum := (bitWidth + 7) / 8
 		headerBuf := WriteUnsignedVarInt(uint64(header))
 
-		valBuf := WritePlain([]interface{}{vals[i]}, pt)
+		valBuf := WritePlain(nil, []interface{}{vals[i]}, pt)
 
 		rleBuf := make([]byte, int64(len(headerBuf))+int64(byteNum))
 		copy(rleBuf[0:], headerBuf)
@@ -173,16 +181,15 @@ func WriteRLE(vals []interface{}, bitWidth int32, pt parquet.Type) []byte {
 func WriteRLEBitPackedHybrid(vals []interface{}, bitWidths int32, pt parquet.Type) []byte {
 	rleBuf := WriteRLE(vals, bitWidths, pt)
 	res := make([]byte, 0)
-	lenBuf := WritePlain([]interface{}{int32(len(rleBuf))}, parquet.Type_INT32)
+	lenBuf := WritePlain(nil, []interface{}{int32(len(rleBuf))}, parquet.Type_INT32)
 	res = append(res, lenBuf...)
 	res = append(res, rleBuf...)
 	return res
 }
 
-func WriteRLEInt32(vals []int32, bitWidth int32) []byte {
+func WriteRLEInt32(storage []byte, vals []int32, bitWidth int32) []byte {
 	ln := len(vals)
 	i := 0
-	res := make([]byte, 0)
 	for i < ln {
 		j := i + 1
 		for j < ln && vals[j] == vals[i] {
@@ -196,20 +203,22 @@ func WriteRLEInt32(vals []int32, bitWidth int32) []byte {
 		var valBuf [4]byte
 		binary.LittleEndian.PutUint32(valBuf[:], uint32(vals[i]))
 
-		res = append(res, headerBuf...)
-		res = append(res, valBuf[:byteNum]...)
+		storage = append(storage, headerBuf...)
+		storage = append(storage, valBuf[:byteNum]...)
 		i = j
 	}
-	return res
+	return storage
 }
 
-func WriteRLEBitPackedHybridInt32(vals []int32, bitWidths int32) []byte {
-	rleBuf := WriteRLEInt32(vals, bitWidths)
-	res := make([]byte, 0)
-	lenBuf := WritePlain([]interface{}{int32(len(rleBuf))}, parquet.Type_INT32)
-	res = append(res, lenBuf...)
-	res = append(res, rleBuf...)
-	return res
+func WriteRLEBitPackedHybridInt32(storage []byte, vals []int32, bitWidths int32) []byte {
+	// Write 4 bytes to the front, which we'll overwrite with the real length later.
+	storage = append(storage, []byte{0, 0, 0, 0}...)
+	initialLen := len(storage)
+	storage = WriteRLEInt32(storage, vals, bitWidths)
+
+	lenBuf := WritePlain(nil, []interface{}{int32(len(storage) - initialLen)}, parquet.Type_INT32)
+	copy(storage[initialLen-4:initialLen], lenBuf)
+	return storage
 }
 
 func WriteBitPacked(vals []interface{}, bitWidth int64, ifHeader bool) []byte {

@@ -55,8 +55,8 @@ func PagesToChunk(pages []*Page) *Chunk {
 	metaData.Statistics = parquet.NewStatistics()
 
 	if maxVal != nil && minVal != nil {
-		tmpBufMax := encoding.WritePlain([]interface{}{maxVal}, *pT)
-		tmpBufMin := encoding.WritePlain([]interface{}{minVal}, *pT)
+		tmpBufMax := encoding.WritePlain(nil, []interface{}{maxVal}, *pT)
+		tmpBufMin := encoding.WritePlain(nil, []interface{}{minVal}, *pT)
 		if (cT != nil && *cT == parquet.ConvertedType_UTF8) ||
 			(cT != nil && *cT == parquet.ConvertedType_DECIMAL && *pT == parquet.Type_BYTE_ARRAY) {
 			tmpBufMax = tmpBufMax[4:]
@@ -117,8 +117,8 @@ func PagesToDictChunk(pages []*Page) *Chunk {
 	metaData.Statistics = parquet.NewStatistics()
 
 	if maxVal != nil && minVal != nil {
-		tmpBufMax := encoding.WritePlain([]interface{}{maxVal}, *pT)
-		tmpBufMin := encoding.WritePlain([]interface{}{minVal}, *pT)
+		tmpBufMax := encoding.WritePlain(nil, []interface{}{maxVal}, *pT)
+		tmpBufMin := encoding.WritePlain(nil, []interface{}{minVal}, *pT)
 		if (cT != nil && *cT == parquet.ConvertedType_UTF8) ||
 			(cT != nil && *cT == parquet.ConvertedType_DECIMAL && *pT == parquet.Type_BYTE_ARRAY) {
 			tmpBufMax = tmpBufMax[4:]
